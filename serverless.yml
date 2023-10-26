@@ -1,0 +1,133 @@
+service: aws-node-http-api-project
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  lambdaHashingVersion: 20201221
+
+  # you can overwrite defaults here
+  #  stage: dev
+  #  region: us-east-1
+
+  # you can add statements to the Lambda function's IAM Role here
+  #  iamRoleStatements:
+  #    - Effect: "Allow"
+  #      Action:
+  #        - "s3:ListBucket"
+  #      Resource: { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "ServerlessDeploymentBucket" } ] ]  }
+  #    - Effect: "Allow"
+  #      Action:
+  #        - "s3:PutObject"
+  #      Resource:
+  #        Fn::Join:
+  #          - ""
+  #          - - "arn:aws:s3:::"
+  #            - "Ref" : "ServerlessDeploymentBucket"
+  #            - "/*"
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - "dynamodb:PutItem"
+            - "dynamodb:GetItem"
+            - "dynamodb:DeleteItem"
+            - "dynamodb:Scan"
+          Resource:
+            - { "Fn::GetAtt": ["ProductsTable", "Arn"] }
+
+
+plugins:
+  - serverless-offline
+
+functions:
+  createProduct:
+    handler: src/handlers.createProduct
+    events:
+      - httpApi:
+          path: /product
+          method: post
+  getProduct:
+    handler: src/handlers.getProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: get
+  updateProduct:
+    handler: src/handlers.updateProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: put
+  deleteProduct:
+    handler: src/handlers.deleteProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: delete
+  listProduct:
+    handler: src/handlers.listProduct
+    events:
+      - httpApi:
+          path: /products
+          method: get
+  createStripeCustomer:
+    handler: src/handlers.createStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers
+          method: post
+  getStripeCustomer:
+    handler: src/handlers.getStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers/{id}
+          method: get
+  deleteStripeCustomer:
+    handler: src/handlers.deleteStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers/{id}
+          method: delete
+  createStripeSubscription:
+    handler: src/handlers.createStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions
+          method: post
+  updateStripeSubscription:
+    handler: src/handlers.updateStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}
+          method: put
+  getStripeSubscription:
+    handler: src/handlers.getStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}
+          method: get
+  createStripeCheckout:
+    handler: src/handlers.createStripeCheckout
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/create
+          method: post
+
+resources:
+  Resources:
+    ProductsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ProductsTable
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        AttributeDefinitions:
+          - AttributeName: productID
+            AttributeType: S
+        KeySchema:
+          - AttributeName: productID
+            KeyType: HASH
