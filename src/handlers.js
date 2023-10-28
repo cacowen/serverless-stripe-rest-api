@@ -263,7 +263,7 @@ const deleteStripeCustomer = async (event) => {
     return {
       statusCode: 200,
       headers,
-      data: JSON.stringify(deleted, null, 4)
+      body: JSON.stringify(deleted, null, 4)
     }
   } catch (error) {
     console.log(error)
@@ -291,7 +291,7 @@ const createStripeSubscription = async (event) => {
     return {
       statusCode: 200,
       headers,
-      data: JSON.stringify(subscription, null, 4)
+      body: JSON.stringify(subscription, null, 4)
     }
   } catch (error) {
     console.log(error)
@@ -308,6 +308,7 @@ const updateStripeSubscription = async (event) => {
   event.body = JSON.parse(event.body)
   try {
     const id = event.pathParameters?.id;
+    
     const subscription = await stripe.subscriptions.update(
       id,
       { cancel_at_period_end: event.body.cancel }
@@ -315,7 +316,7 @@ const updateStripeSubscription = async (event) => {
     return {
       statusCode: 200,
       headers,
-      data: JSON.stringify(subscription, null, 4)
+      body: JSON.stringify(subscription, null, 4)
     }
   } catch (error) {
     console.log(error)
@@ -337,7 +338,7 @@ const getStripeSubscription = async (event) => {
     return {
       statusCode: 200,
       headers,
-      data: JSON.stringify(subscription, null, 4)
+      body: JSON.stringify(subscription, null, 4)
     }
   } catch (error) {
     console.log(error)
@@ -361,11 +362,10 @@ const createStripeCheckout = async (event) => {
       ],
       mode: 'subscription',
     });
-    console.log(session)
     return {
       statusCode: 200,
       headers,
-      data: JSON.stringify({ url: session.url, id: session.id }, null, 4)
+      body: JSON.stringify({ url: session.url, id: session.id }, null, 4)
     }
   } catch (error) {
     console.log(error.message)
