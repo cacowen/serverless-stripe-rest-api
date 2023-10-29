@@ -188,17 +188,6 @@ const listProduct = async (event) => {
 
 const createStripeCustomer = async (event) => {
   event.body = JSON.parse(event.body)
-  // const output = await docClient
-  //   .scan({
-  //     TableName: tableName,
-  //   })
-  //   .promise();
-
-  // return {
-  //   statusCode: 200,
-  //   headers,
-  //   body: JSON.stringify(output.Items),
-  // };
   try {
     const customer = await stripe.customers.create({
       description: 'customer',
@@ -207,10 +196,15 @@ const createStripeCustomer = async (event) => {
         userid: event.body.userId
       }
     });
+    // Create a SetupIntent to set up our payment methods recurring usage
+    const setupIntent = await stripe.setupIntents.create({
+      payment_method_types: ['card'],
+      customer: customer.id,
+    });
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify(customer, null, 4)
+      body: JSON.stringify({ customer, setupIntent }, null, 4)
     }
   } catch (error) {
     console.log(error)
@@ -279,15 +273,25 @@ const deleteStripeCustomer = async (event) => {
 const createStripeSubscription = async (event) => {
   event.body = JSON.parse(event.body)
   try {
+    await stripe.paymentMethods.attach(event.body.paymentMethodId, {
+      customer: event.body.customerId,
+    });
+
+    let updateCustomerDefaultPaymentMethod = await stripe.customers.update(
+      event.body.customerId,
+      {
+        invoice_settings: {
+          default_payment_method: event.body.paymentMethodId,
+        },
+      }
+    );
 
     const subscription = await stripe.subscriptions.create({
       customer: event.body.customerId,
-      items: [
-        {
-          price: event.body.priceId
-        },
-      ],
+      items: [{ plan: process.env[event.body.planId] }],
+      expand: ['latest_invoice.payment_intent'],
     });
+
     return {
       statusCode: 200,
       headers,
@@ -304,11 +308,11 @@ const createStripeSubscription = async (event) => {
   }
 };
 
-const updateStripeSubscription = async (event) => {
+const stopOrRestartStripeSubscription = async (event) => {
   event.body = JSON.parse(event.body)
   try {
     const id = event.pathParameters?.id;
-    
+
     const subscription = await stripe.subscriptions.update(
       id,
       { cancel_at_period_end: event.body.cancel }
@@ -377,6 +381,144 @@ const createStripeCheckout = async (event) => {
     }
   }
 };
+
+const addOrUpdatePaymentMethod = async (event) => {
+  event.body = JSON.parse(event.body)
+  try {
+    await stripe.paymentMethods.attach(
+      event.body.paymentMethodId,
+      {
+        customer: event.body.customerId,
+      }
+    );
+    await stripe.customers.update(
+      event.body.customerId,
+      {
+        invoice_settings: {
+          default_payment_method: event.body.paymentMethodId,
+        },
+      }
+    );
+  } catch (error) {
+    // in case card_decline error
+    console.log(error.message)
+    return {
+      statusCode: 400,
+      headers,
+      body: null,
+      error: error
+    }
+  }
+
+  const invoice = await stripe.invoices.retrieve(event.body.invoiceId, {
+    expand: ['payment_intent'],
+  });
+
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify(invoice, null, 4)
+  }
+}
+
+
+const upcomingInvoices = async (event) => {
+  try {
+    event.body = JSON.parse(event.body);
+    const subscription = await stripe.subscriptions.retrieve(
+      event.body.subscriptionId
+    );
+
+    const invoice = await stripe.invoices.retrieveUpcoming({
+      subscription_prorate: true,
+      customer: event.body.customerId,
+      subscription: event.body.subscriptionId,
+      // subscription_trial_end: event.body.subscription_trial_end || '',
+      subscription_items: [
+        {
+          id: subscription.items.data[0].id,
+          deleted: true,
+        },
+        {
+          plan: process.env[event.body.newPlanId],
+          deleted: false,
+        },
+      ],
+    });
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(invoice, null, 4)
+    }
+  } catch (error) {
+    console.log(error.message)
+    return {
+      statusCode: 400,
+      headers,
+      body: null,
+      error: error
+    }
+  }
+}
+
+const upgradeOrDownGradeSubscription = async (event) => {
+  try {
+    event.body = JSON.parse(event.body);
+    const subscription = await stripe.subscriptions.retrieve(
+      event.body.subscriptionId
+    );
+    const updatedSubscription = await stripe.subscriptions.update(
+      event.body.subscriptionId,
+      {
+        cancel_at_period_end: false,
+        items: [
+          {
+            id: subscription.items.data[0].id,
+            plan: process.env[event.body.newPlanId],
+          },
+        ],
+      }
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(updatedSubscription, null, 4)
+    }
+  } catch (error) {
+    console.log(error.message)
+    return {
+      statusCode: 400,
+      headers,
+      body: null,
+      error: error
+    }
+  }
+}
+
+
+const retriveCustomerPaymentMethod = async (event) => {
+  try {
+    event.body = JSON.parse(event.body);
+    const paymentMethod = await stripe.paymentMethods.retrieve(
+      event.body.paymentMethodId
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(paymentMethod, null, 4)
+    }
+  } catch (error) {
+    console.log(error.message)
+    return {
+      statusCode: 400,
+      headers,
+      body: null,
+      error: error
+    }
+  }
+}
 
 // M.A : This is basically a clone of handleSuccess function , but with a couple of changes
 const handlePaymentSuccess = async (
@@ -625,11 +767,15 @@ module.exports = {
   fetchProductById,
   listProduct,
   updateProduct,
-  updateStripeSubscription,
+  stopOrRestartStripeSubscription,
   createStripeCustomer,
   createStripeSubscription,
   deleteStripeCustomer,
   getStripeSubscription,
   getStripeCustomer,
-  createStripeCheckout
+  createStripeCheckout,
+  addOrUpdatePaymentMethod,
+  upcomingInvoices,
+  upgradeOrDownGradeSubscription,
+  retriveCustomerPaymentMethod
 }
