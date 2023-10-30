@@ -1,5 +1,5 @@
 service: aws-node-http-api-project
-frameworkVersion: '3'
+frameworkVersion: "3"
 
 provider:
   name: aws
@@ -37,7 +37,6 @@ provider:
             - "dynamodb:Scan"
           Resource:
             - { "Fn::GetAtt": ["ProductsTable", "Arn"] }
-
 
 plugins:
   - serverless-offline
@@ -97,11 +96,17 @@ functions:
       - httpApi:
           path: /stripe/subscriptions
           method: post
-  updateStripeSubscription:
-    handler: src/handlers.updateStripeSubscription
+  stopOrRestartStripeSubscription:
+    handler: src/handlers.stopOrRestartStripeSubscription
     events:
       - httpApi:
-          path: /stripe/subscriptions/{id}
+          path: /stripe/subscriptions/{id}/stop-or-restart
+          method: put
+  upgradeOrDownGradeSubscription:
+    handler: src/handlers.upgradeOrDownGradeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}/upgrade-or-downgrade
           method: put
   getStripeSubscription:
     handler: src/handlers.getStripeSubscription
@@ -109,11 +114,41 @@ functions:
       - httpApi:
           path: /stripe/subscriptions/{id}
           method: get
+  deleteStripeSubscription:
+    handler: src/handlers.deleteStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}
+          method: delete
+  retriveCustomerPaymentMethod:
+    handler: src/handlers.retriveCustomerPaymentMethod
+    events:
+      - httpApi:
+          path: /stripe/pm/{id}
+          method: get
   createStripeCheckout:
     handler: src/handlers.createStripeCheckout
     events:
       - httpApi:
           path: /stripe/subscriptions/create
+          method: post
+  addOrUpdatePaymentMethod:
+    handler: src/handlers.addOrUpdatePaymentMethod
+    events:
+      - httpApi:
+          path: /stripe/pm/{id}
+          method: post
+  upcomingInvoices:
+    handler: src/handlers.upcomingInvoices
+    events:
+      - httpApi:
+          path: /stripe/invoices/upcoming
+          method: post
+  webhook:
+    handler: src/handlers.webhook
+    events:
+      - httpApi:
+          path: /stripe/webhook
           method: post
 
 resources:

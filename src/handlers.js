@@ -73,33 +73,12 @@ const fetchProductById = async (id) => {
 };
 
 const handleError = (e) => {
-  if (e instanceof yup.ValidationError) {
-    return {
-      statusCode: 400,
-      headers,
-      body: JSON.stringify({
-        errors: e.errors,
-      }),
-    };
+  return {
+    statusCode: 400,
+    headers,
+    body: null,
+    error: e
   }
-
-  if (e instanceof SyntaxError) {
-    return {
-      statusCode: 400,
-      headers,
-      body: JSON.stringify({ error: `invalid request body format : "${e.message}"` }),
-    };
-  }
-
-  if (e instanceof HttpError) {
-    return {
-      statusCode: e.statusCode,
-      headers,
-      body: e.message,
-    };
-  }
-
-  throw e;
 };
 
 const getProduct = async (event) => {
@@ -286,12 +265,64 @@ const createStripeSubscription = async (event) => {
       }
     );
 
+    const subscriptions = await stripe.subscriptions.list({ customer: event.body.customerId, status: 'active' })
+
+    if (subscriptions.data && subscriptions.data.length) {
+      const subscription = subscriptions.data[0]
+      const updatedSubscription = await stripe.subscriptions.update(
+        subscription.id,
+        {
+          cancel_at_period_end: false,
+          items: [
+            {
+              // id: subscription.items.data[0].id,
+              price: event.body.planId,
+            },
+          ],
+        }
+      );
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ updatedSubscription: updatedSubscription }, null, 4)
+      }
+    }
+
     const subscription = await stripe.subscriptions.create({
       customer: event.body.customerId,
-      items: [{ plan: process.env[event.body.planId] }],
+      items: [{ plan: event.body.planId }],
       expand: ['latest_invoice.payment_intent'],
+      metadata: {
+        userid: event.body.customerId
+      }
     });
 
+    console.log('subscription - ', subscription)
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(subscription, null, 4)
+    }
+  } catch (error) {
+    console.log(error)
+    return {
+      statusCode: 400,
+      headers,
+      body: null,
+      error: error
+    }
+  }
+};
+
+const deleteStripeSubscription = async (event) => {
+  event.body = JSON.parse(event.body)
+  try {
+    const id = event.pathParameters?.id;
+
+    const subscription = await stripe.subscriptions.cancel(
+      id,
+    );
     return {
       statusCode: 200,
       headers,
@@ -357,19 +388,23 @@ const getStripeSubscription = async (event) => {
 
 const createStripeCheckout = async (event) => {
   event.body = JSON.parse(event.body)
+
+  // if customer paid by checkout url process then need to cancle or delete current active subscription so user will have only one subscription 
+  // or we can use subscription create method to merge stripe both subscriptions
   try {
-    const session = await stripe.checkout.sessions.create({
+    const data = {
       customer: event.body.customerId,
       success_url: event.body.success_url,
       line_items: [
         { price: event.body.priceId, quantity: 1 },
       ],
       mode: 'subscription',
-    });
+    }
+    const session = await stripe.checkout.sessions.create(data);
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ url: session.url, id: session.id }, null, 4)
+      body: JSON.stringify(session, null, 4)
     }
   } catch (error) {
     console.log(error.message)
@@ -383,22 +418,35 @@ const createStripeCheckout = async (event) => {
 };
 
 const addOrUpdatePaymentMethod = async (event) => {
+  // need to get payment method id from frontend when card verification proceed by stripe element
+  // frontend have a method to create payment method from card element 
+  // so we will get payment method from frontend then need to call this route so newly created method will be attched to customer
+
   event.body = JSON.parse(event.body)
   try {
-    await stripe.paymentMethods.attach(
-      event.body.paymentMethodId,
-      {
-        customer: event.body.customerId,
-      }
-    );
-    await stripe.customers.update(
+    try {
+      await stripe.paymentMethods.attach(
+        event.pathParameters.id,
+        {
+          customer: event.body.customerId,
+        }
+      );
+    } catch (error) {
+      console.log('payment method attached error due to already payment method attached!! - ', error)
+    }
+    const customerDetails = await stripe.customers.update(
       event.body.customerId,
       {
         invoice_settings: {
-          default_payment_method: event.body.paymentMethodId,
+          default_payment_method: event.pathParameters.id,
         },
       }
     );
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(customerDetails, null, 4)
+    }
   } catch (error) {
     // in case card_decline error
     console.log(error.message)
@@ -430,20 +478,9 @@ const upcomingInvoices = async (event) => {
     );
 
     const invoice = await stripe.invoices.retrieveUpcoming({
-      subscription_prorate: true,
+      // subscription_prorate: true,
       customer: event.body.customerId,
       subscription: event.body.subscriptionId,
-      // subscription_trial_end: event.body.subscription_trial_end || '',
-      subscription_items: [
-        {
-          id: subscription.items.data[0].id,
-          deleted: true,
-        },
-        {
-          plan: process.env[event.body.newPlanId],
-          deleted: false,
-        },
-      ],
     });
     return {
       statusCode: 200,
@@ -465,16 +502,16 @@ const upgradeOrDownGradeSubscription = async (event) => {
   try {
     event.body = JSON.parse(event.body);
     const subscription = await stripe.subscriptions.retrieve(
-      event.body.subscriptionId
+      event.pathParameters.id
     );
     const updatedSubscription = await stripe.subscriptions.update(
-      event.body.subscriptionId,
+      subscription.id,
       {
         cancel_at_period_end: false,
         items: [
           {
             id: subscription.items.data[0].id,
-            plan: process.env[event.body.newPlanId],
+            price: event.body.priceId,
           },
         ],
       }
@@ -499,9 +536,8 @@ const upgradeOrDownGradeSubscription = async (event) => {
 
 const retriveCustomerPaymentMethod = async (event) => {
   try {
-    event.body = JSON.parse(event.body);
     const paymentMethod = await stripe.paymentMethods.retrieve(
-      event.body.paymentMethodId
+      event.pathParameters.id
     );
 
     return {
@@ -534,24 +570,26 @@ const handlePaymentSuccess = async (
   /** Retrive stripe subscription */
   let stripeSubscriptionDetails;
   try {
-    // stripeSubscriptionDetails = await stripe.subscriptions.retrieve(
-    //   subscription_id
-    // );
+    stripeSubscriptionDetails = await stripe.subscriptions.retrieve(
+      subscription_id
+    );
 
-    // if (stripeSubscriptionDetails.id) {
-    //   start_date = new Date(stripeSubscriptionDetails.current_period_start * 1000);
-    //   end_date = new Date(stripeSubscriptionDetails.current_period_end * 1000);
-    // }
+    if (stripeSubscriptionDetails.id) {
+      start_date = new Date(stripeSubscriptionDetails.current_period_start * 1000);
+      end_date = new Date(stripeSubscriptionDetails.current_period_end * 1000);
+    }
 
-    // if (stripeSubscriptionDetails.default_payment_method) {
-    //   // set customer's default payment method
-    //   await stripe.customers.update(customer_id, {
-    //     invoice_settings: {
-    //       default_payment_method:
-    //         stripeSubscriptionDetails?.default_payment_method,
-    //     },
-    //   });
-    // }
+    if (stripeSubscriptionDetails.default_payment_method) {
+      // set customer's default payment method
+      await stripe.customers.update(customer_id, {
+        invoice_settings: {
+          default_payment_method:
+            stripeSubscriptionDetails?.default_payment_method,
+        },
+      });
+    }
+
+    // update user subscription in database
     // await Subscription.update(
     //   {
     //     stripe_subscription_id: subscription_id,
@@ -595,160 +633,219 @@ const handlePaymentSuccess = async (
   } catch (error) {
     console.log("Error in handlePaymentSuccess :", error)
     /** Handle retrive stripe subscription error */
+    return {
+      statusCode: 400,
+      headers,
+      body: JSON.stringify(error, null, 4)
+    }
   }
-
 };
 
 const webhook = async (event) => {
   event.body = JSON.parse(event.body)
   try {
 
-    // let data;
+    let data;
 
-    // let eventType;
-    // const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    // if (webhookSecret) {
-    //   let event;
-    //   let signature = req.headers["stripe-signature"];
-    //   console.log("hi", req.rawBody);
+    let eventType;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      let event;
+      // let signature = req.headers["stripe-signature"];
+      // console.log("hi", req.rawBody);
 
-    //   try {
-    //     event = stripe.webhooks.constructEvent(
-    //       req.rawBody,
-    //       signature ?? "",
-    //       webhookSecret
-    //     );
-    //   } catch (err) {
-    //     return res.status(400).send(err);
-    //   }
-    //   data = event.data;
-    //   eventType = event.type;
-    // } else {
-    //   data = req.body.data;
-    //   eventType = req.body.type;
-    // }
+      // try {
+      //   event = stripe.webhooks.constructEvent(
+      //     event.rawBody,
+      //     signature ?? "",
+      //     webhookSecret
+      //   );
+      // } catch (err) {
+      //   // return res.status(400).send(err);
+      // }
+      data = event.body.data;
+      eventType = event.body.type;
+    } else {
+      data = event.body.data;
+      eventType = event.body.type;
+    }
 
-    // const handlePayment = async (data: any, eventType: string) => {
-    //   try {
-    //     console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
-    //     // calculate for subscription update and add login to update usage
-    //     // "billing_reason": "subscription_update",
+    const handlePayment = async (data, eventType) => {
+      try {
+        console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
+        // calculate for subscription update and add login to update usage
+        // "billing_reason": "subscription_update",
 
-    //     await handlePaymentSuccess(
-    //       data.object.subscription_details.metadata.user_id,
-    //       data.object.customer,
-    //       data.object.subscription
-    //     );
+        await handlePaymentSuccess(
+          data.object.metadata.userid,
+          data.object.customer,
+          data.object.id
+        );
 
-    //     return res.status(200).send({
-    //       status: "Success",
-    //       message: `billing_reason: ${data.object.billing_reason}, User:${data.object.customer} :  Success`,
-    //     });
-    //   } catch (error) {
-    //     console.log(`\n Error:billing_reason: ${data.object.billing_reason}, User:${data.object.customer}  `, error)
-    //     return res.status(500).send({
-    //       status: "Failed",
-    //       message: `billing_reason: ${data.object.billing_reason}, User:${data.object.customer}:  failed`,
-    //       error
-    //     });
-    //   }
-    // }
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            status: "Success",
+            message: `billing_reason: ${data.object.billing_reason}, User:${data.object.customer} :  Success`,
+          }, null, 4)
+        }
+      } catch (error) {
+        console.log(`\n Error:billing_reason: ${data.object.billing_reason}, User:${data.object.customer}  `, error)
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            status: "Failed",
+            message: `billing_reason: ${data.object.billing_reason}, User:${data.object.customer}:  failed`,
+            error
+          }, null, 4)
+        }
+      }
+    }
 
+    switch (eventType) {
+      case "checkout.session.completed":
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+      case "customer.created":
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+      case "invoice.paid":
+        await handlePayment(data, eventType)
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+      case "invoice.payment_failed":
 
-    // switch (eventType) {
-    //   case "checkout.session.completed":
-    //     return res.sendStatus(200)
-    //   case "customer.created":
-    //     return res.sendStatus(200)
-    //   case "invoice.paid":
-    //     await handlePayment(data, eventType)
-    //   // return res.sendStatus(200)
-    //   case "invoice.payment_failed":
+        console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
+        // console.log("🚀 ~ file: subscription.controller.ts:575 ~ webhook ~ data.object.billing_reason ==:", data.object.billing_reason == "subscription_cycle")
+        try {
+          console.log("🚀 ~ file: subscription.controller.ts:490 ~ webhook ~ data.object.billing_reason:", data.object.billing_reason == "subscription_cycle")
+          console.log("🚀 ~ file: subscription.controller.ts:502 ~ webhook ~ data.object.metadata.userid:", data.object.subscription_details.metadata.userid)
+          if (data.object.billing_reason == "subscription_cycle") {
+            // revoke user usage in database if required like below
+            //   await User.update(
+            //     {
+            //       current_plan_id: 1,
+            //       usage: {
+            //         pages: 0,
+            //         queries: 0,
+            //         size: 1,
+            //       },
+            //     },
+            //     {
+            //       where: { id: data.object.subscription_details.metadata.userid },
+            //       returning: true,
+            //     }
+            //   );
+          }
 
-    //     console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
-    //     // console.log("🚀 ~ file: subscription.controller.ts:575 ~ webhook ~ data.object.billing_reason ==:", data.object.billing_reason == "subscription_cycle")
-    //     try {
-    //       console.log("🚀 ~ file: subscription.controller.ts:490 ~ webhook ~ data.object.billing_reason:", data.object.billing_reason == "subscription_cycle")
-    //       console.log("🚀 ~ file: subscription.controller.ts:502 ~ webhook ~ data.object.metadata.user_id:", data.object.subscription_details.metadata.user_id)
-    //       if (data.object.billing_reason == "subscription_cycle") {
-    //         await User.update(
-    //           {
-    //             current_plan_id: 1,
-    //             usage: {
-    //               pages: 0,
-    //               queries: 0,
-    //               size: 1,
-    //             },
-    //           },
-    //           {
-    //             where: { id: data.object.subscription_details.metadata.user_id },
-    //             returning: true,
-    //           }
-    //         );
-    //       }
-    //       return res.sendStatus(200)
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({}, null, 4)
+          }
 
-    //     } catch (err) {
-    //       console.log("Error in payment failed evenr:", err)
-    //       return res.status(500).json({ Error: JSON.stringify(err) })
-    //     }
-    //     break;
+        } catch (err) {
+          console.log("Error in payment failed evenr:", err)
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify(error, null, 4)
+          }
+        }
+        break;
 
-    //   case "invoice.payment_succeeded":
-    //     await handlePayment(data, eventType)
-    //     break;
+      case "invoice.payment_succeeded":
+        await handlePayment(data, eventType)
+        break;
 
-    //   case "customer.subscription.deleted":
-    //     console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
-    //     // This Event is used to reset usage in USER table and Deleting subscription from Subscription table
-    //     const user_id = data.object.metadata.user_id;
+      case "customer.subscription.deleted":
+        console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
+        // This Event is used to reset usage in USER table and Deleting subscription from Subscription table
+        const userid = data.object.metadata.userid;
 
-    //     const deactiveStatus = ["canceled", "ended"];
+        const deactiveStatus = ["canceled", "ended"];
 
-    //     try {
-    //       if (deactiveStatus.includes(data.object.status)) {
-    //         let UpdatedUser = await User.update(
-    //           {
-    //             current_plan_id: 1,
-    //             usage: {
-    //               pages: 0,
-    //               queries: 0,
-    //               size: 1,
-    //             },
-    //           },
-    //           {
-    //             where: { id: user_id },
-    //             returning: true,
-    //           }
-    //         );
+        try {
+          if (deactiveStatus.includes(data.object.status)) {
+            // update user useage like below
+            // let UpdatedUser = await User.update(
+            //   {
+            //     current_plan_id: 1,
+            //     usage: {
+            //       pages: 0,
+            //       queries: 0,
+            //       size: 1,
+            //     },
+            //   },
+            //   {
+            //     where: { id: userid },
+            //     returning: true,
+            //   }
+            // );
 
-    //         let subscription_id = UpdatedUser[1][0]?.dataValues?.subscription_id
+            // let subscription_id = UpdatedUser[1][0]?.dataValues?.subscription_id
 
-    //         if (subscription_id)
-    //           Subscription.destroy({ where: { id: subscription_id } });
-    //       }
-    //       return res
-    //         .status(200)
-    //         .send({ status: "success", message: `subscription ${data.object.status}` });
+            // if (subscription_id)
+            //   Subscription.destroy({ where: { id: subscription_id } });
+          }
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({}, null, 4)
+          }
 
-    //     } catch (error) {
-    //       return res.status(500).send({
-    //         status: "Failed",
-    //         message: `Fail to delete subscription ${user_id}`,
-    //         error
-    //       });
-    //     }
-    //     break;
+        } catch (error) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify(error, null, 4)
+          }
+        }
+        break;
 
-    //   case "customer.subscription.updated":
-    //     console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
-    //     return res.status(200).send({ status: "success", message: "success" });
-    //     break;
-    //   default:
-    //     res.sendStatus(200)
-    //     break;
-    // }
-    // return;
+      case "customer.subscription.updated":
+        console.log(`\n stripe_debug_${eventType} >>>>>>>>`, JSON.stringify(data));
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+        break;
+
+      case 'customer.subscription.created':
+        const customerSubscriptionCreated = data;
+        await handlePayment(data, eventType)
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+        // Then define and call a function to handle the event customer.subscription.created
+        break;
+      default:
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({}, null, 4)
+        }
+        break;
+    }
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({}, null, 4)
+    }
 
   } catch (error) {
     console.log(error)
@@ -777,5 +874,7 @@ module.exports = {
   addOrUpdatePaymentMethod,
   upcomingInvoices,
   upgradeOrDownGradeSubscription,
-  retriveCustomerPaymentMethod
+  retriveCustomerPaymentMethod,
+  webhook,
+  deleteStripeSubscription
 }
