@@ -1,0 +1,73 @@
+A potential client goes to my site and creates an account.
+
+Internally we setup a trial for them. During that trial period we will have links for them to purchase a license.
+After a period of time they cannot use the system unless they purchase a license.
+The trial will be managed outside of stripe.
+
+Once they choose to purchase a license it will take them to a page where they select what they want.
+
+This page will be the "Products" page. It will list out all the things they can add to their account.
+
+they will be able to choose things like:
+
+* Activity License => $19.99 per month per user
+* Email Feature => $4.99 per month per user
+* Report Feature => $2.99 per month per user
+
+They can choose however many of these they want. For this example lets say they choose 5x activity licenses, and 2x email features.
+
+They should be able to click the Activate Account button which will call stripe.
+This will create the stripe customer and a subscription with those chosen products.
+
+They should be asked if they want to be billed by credit card or ach. The checkout should allow them to put the information in for either.
+
+Internally they will assign the purchased products to users they will create in our system.
+
+User A1:
+    Activity License
+    Email Feature
+User B2:
+    Activity License
+    Email Feature
+User C3:
+    Activity License
+User D4:
+    Activity License
+User E5:
+    Activity License
+User F6: (none)
+User G7: (none)
+
+Users F6 and G7 will not be able to use the system, but the other users can. And users A1 and B2 can also use the email feature.
+We will have a table that maps the things assigned to the users with the purchased stripe products from the other table.
+
+This works for them but a few months later they want to add 2 more email features, add 1x report feature, and remove 1x activity license.
+
+They click a button to Modify Subscription and it shows all the things they have. They select they things they want to add and remove and hit update.
+This should then call stripe and make the changes to the subscription.
+The webhook should populate the DynamoDb table so when the user goes to the assignments they assign the purchased products.
+
+Then the user can make the modifications to the assignments:
+
+User A1:
+    Activity License
+    Email Feature
+    Report Feature - added -
+User B2:
+    Activity License
+    Email Feature
+User C3:
+    Activity License
+    Email Feature - added -
+User D4:
+    Activity License
+    Email Feature - added -
+User E5: (none) - removed -
+User F6: (none)
+User G7: (none)
+
+There should be a few more buttons for the client to click as well:
+ - If the client wants to change credit cards or change how they are billed (like going from ACH to Credit Card or vice versa), then they should be able to do that.
+ - If the client wants to see a current invoice then they should be able to download that as well.
+ - If the client no longer wants the service and wants to cancel the account they should be able to do that as well.
+ 
