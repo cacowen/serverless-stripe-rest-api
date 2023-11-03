@@ -1,0 +1,93 @@
+service: stripe-api-stripe
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  lambdaHashingVersion: 20201221
+
+plugins:
+  - serverless-offline
+
+functions:
+  createStripeCustomer:
+    handler: stripe/handlers/customer/createStripeCustomer.createStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers
+          method: post
+  getStripeCustomer:
+    handler: stripe/handlers/customer/getStripeCustomer.getStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers/{id}
+          method: get
+  deleteStripeCustomer:
+    handler: stripe/handlers/customer/deleteStripeCustomer.deleteStripeCustomer
+    events:
+      - httpApi:
+          path: /stripe/customers/{id}
+          method: delete
+
+  createStripeSubscription:
+    handler: stripe/handlers/subscription/createStripeSubscription.createStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions
+          method: post
+  stopOrRestartStripeSubscription:
+    handler: stripe/handlers/subscription/stopOrRestartStripeSubscription.stopOrRestartStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}/stop-or-restart
+          method: put
+  upgradeOrDownGradeSubscription:
+    handler: stripe/handlers/subscription/upgradeOrDownGradeSubscription.upgradeOrDownGradeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}/upgrade-or-downgrade
+          method: put
+  getStripeSubscription:
+    handler: stripe/handlers/subscription/getStripeSubscription.getStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}
+          method: get
+  deleteStripeSubscription:
+    handler: stripe/handlers/subscription/deleteStripeSubscription.deleteStripeSubscription
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/{id}
+          method: delete
+
+  retrieveCustomerPaymentMethod:
+    handler: stripe/handlers/payment/retrieveCustomerPaymentMethod.retrieveCustomerPaymentMethod
+    events:
+      - httpApi:
+          path: /stripe/pm/{id}
+          method: get
+  createStripeCheckout:
+    handler: stripe/handlers/payment/createStripeCheckout.createStripeCheckout
+    events:
+      - httpApi:
+          path: /stripe/subscriptions/create
+          method: post
+  addOrUpdatePaymentMethod:
+    handler: stripe/handlers/payment/addOrUpdatePaymentMethod.addOrUpdatePaymentMethod
+    events:
+      - httpApi:
+          path: /stripe/pm/{id}
+          method: post
+  upcomingInvoices:
+    handler: stripe/handlers/payment/upcomingInvoices.upcomingInvoices
+    events:
+      - httpApi:
+          path: /stripe/invoices/upcoming
+          method: post
+
+  webhook:
+    handler: stripe/handlers/webhook/webhook.webhook
+    events:
+      - httpApi:
+          path: /stripe/webhook
+          method: post
